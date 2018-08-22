@@ -1,0 +1,117 @@
+    public void PerformanceRecomendationData(Har har, String pageTitle)//, String nxtRunID
+
+    {
+        List<Map<String, String>> myListOfMaps = new ArrayList<Map<String, String>>();
+        Map<String, List<String>> myListOfMap = new HashMap<String, List<String>>();
+
+        String path = System.getProperty("user.dir");
+
+        File exe = new File(path + "\\dependency\\har_to_pagespeed.exe");
+        File hhar = new File(path + "\\dependency\\temp.har");
+
+        try {
+
+            hhar.createNewFile();
+            har.writeTo(hhar);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        List<String> command = new ArrayList();
+
+        command.add(exe.getPath());
+        command.add(hhar.getPath());
+
+        ProcessBuilder pb = new ProcessBuilder(command);
+
+        Process p = null;
+        try {
+
+            p = pb.start();
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            Pattern insightP = Pattern.compile("_(.*)_ \\(score=(0|[0-9][0-9]|100)\\)");
+            Pattern descP = Pattern.compile("  (\\w+.*)");
+            Pattern dataP = Pattern.compile("    \\* (\\w+.*)");
+
+            String line;
+            String strMitigation = "Mitigation~";
+            int flag = 0;
+            int i = 0;
+            String keyVal = "";
+
+            List<String> valSetOne = new ArrayList<String>();
+
+            while ((line = reader.readLine()) != null) {
+                Matcher m = insightP.matcher(line);
+                if (m.matches()) {
+                    if (flag == 1) {
+                        myListOfMap.put(keyVal, valSetOne);
+                        valSetOne = new ArrayList<String>();
+                        strMitigation = "Mitigation~";
+                        flag = 0;
+
+                    }
+                    if (flag == 0) {
+                        int sc = Integer.parseInt(m.group(2));
+                        String desc2 = (m.group(1));
+                        keyVal = desc2 + "|" + sc;
+
+//                        System.out.println("Fix at least :" + desc2);
+
+                        flag = 1;
+                    }
+                }
+                m = descP.matcher(line);
+                if (m.matches()) {
+                    String desc = (m.group(1));
+                    valSetOne.add("Recommendation~" + desc);
+                }
+                m = dataP.matcher(line);
+                if (m.matches()) {
+                    String addDescData = (m.group(1));
+                    valSetOne.add("Mitigation~" + addDescData);
+                    strMitigation = strMitigation + ";" + addDescData;
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        for (Map.Entry<String, List<String>> entry : myListOfMap.entrySet()) {
+            String key = entry.getKey();
+            List<String> values = entry.getValue();
+            String rulekey[] = key.split("|");
+
+            String recom = "";
+            for (int k = 0; k < values.size(); k++) {
+
+                if (values.get(k).contains("Recommendation")) {
+                    String str[] = values.get(k).split("~");
+                    recom = str[1];
+                }
+
+                if (values.get(k).contains("Mitigation")) {
+                    String str[] = values.get(k).split("~");
+                    String miti = str[1];
+
+                    Point point3= Point.measurement("cxPerfMitigation")
+                            .tag("pageTitle", pageTitle)
+                            .tag("projectName", projectName)
+                            .tag("runId", nxtRunID)
+                            .field("runId", nxtRunID)
+                            .field("projectName", projectName)
+                            .field("pageTitle", pageTitle)
+                            .field("Rule", key)
+                            .field("Recommendation", recom)
+                            .field("Mitigation", miti)
+                            .build();
+
+                    influxDB.write(dbName,rpName,point3);
+                    //         influxDB.write(batchPoints);
+                }
+            }
+
+        }
+        hhar.delete();
+    }
